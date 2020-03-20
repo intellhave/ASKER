@@ -11,9 +11,11 @@ The performance of our algorithm is shown in the below Figure (refer to the main
 
 ![alt text](img/performance.png)
 </center>
+
+Examples of the final structures obtained by ASKER (blue) compared to IRLS (red). ASKER is able to escape poor local minima, thus achieves better structured compared to IRLS.
 <center>  
 
-![alt text](img/structure_394.png)
+![alt text](img/structure.png)
 </center>
 
 ## Compilation:
@@ -39,3 +41,6 @@ If the compilation is successful, the algorithm can be run using the following s
 `asker <path/to/input/file.txt>`
 
 where the input file is one of the bundle adjustment instances in the Bundle Adjustment In the Large dataset (https://grail.cs.washington.edu/projects/bal/)
+
+An example instance is provided in the Data folder, so the following command can be execute from the build folder to test the compilation:
+`asker ../Data/example_data.txt`
