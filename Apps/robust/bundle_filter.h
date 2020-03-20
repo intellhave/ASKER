@@ -1,12 +1,5 @@
-// -*- C++ -*-
-//In this version, let's do normal penalty method, since it runs quite well.
-// This will generate a set of points on the filter.
-// The iteration runs until encoutering a dominated solution. Then, fron the points on the filter, we start optimize again.
-#ifndef ROBUST_MOO_FILTER_H
-#define ROBUST_MOO_FILTER_H
-
-// #define DEPTH_PARAM_TYPE 0
-// #define AUX_PARAM_TYPE 1 //pi and sigma i
+#ifndef ROBUST_FILTER_H
+#define ROBUST_FILTER_H
 
 #include "robust_lsq_common.h"
 #include "Base/v3d_timer.h"
@@ -14,32 +7,24 @@
 
 namespace Robust_LSQ
 {
-    int const max_iter = 100;
-
     struct Robust_Filter_MOO_Optimizer : public Robust_LSQ_Customized_Weights_Optimizer_Base
     {
-        static int const NLevels = 2;
-        static bool constexpr use_residual_scaling = 0;
-        static double constexpr eta_multiplier = 2;
-        static double constexpr alpha_multiplier = 3;
-        static double constexpr cosine_threshold = -0.95;
         static double constexpr filter_alpha = 0.0001;
-
         static double constexpr penalty_damping = 1e-1;    
+        static double constexpr h_damping = 2.0;
+
+        //This is for line search during exploration (Optional)
         static double constexpr p_step_size_min = 0.99;
         static double constexpr p_step_size_max = 1.0;
         static double constexpr p_step_size_scale = 1.1;
 
-        static double constexpr rho_start = 1.0;
-        // 
-        static double constexpr h_damping = 1.0;
+        //Line Search in Restoration Step
         static double constexpr h_step_size_min = -0.5;
         static double constexpr h_step_size_max = 0.5;
         static double constexpr h_step_size_scale = 0.05;
 
+        //Threshold for early stopping when h is small (optional)
         static double constexpr h_epsilon = 1e-20;
-        // static double constexpr h_step_size = 0.0001;
-        // static int constexpr n_search_steps = 100;
 
         typedef Robust_LSQ_Customized_Weights_Optimizer_Base Base;
 
@@ -100,8 +85,6 @@ namespace Robust_LSQ
                                     std::ofstream &log_file)
             : Base(paramDesc, costFunctions, robustCostFunctions),
             _log_file(log_file),  _Sigma(Sigma)
-            // _fresiduals(costFunctions.size()),
-            // _cvx_xs(robustCostFunctions.size()), _alphas(robustCostFunctions.size())
         {            
             //Allocate the filter
             _filter = new Filter();
@@ -125,8 +108,6 @@ namespace Robust_LSQ
         double _hStepSizeScale = h_step_size_scale;
 
         double _mu, _mu1;
-        vector<double> _cvx_xs;
-        vector<InlineVector<double, NLevels>> _alphas;
 
         enum FilterStep
         {
@@ -153,7 +134,6 @@ namespace Robust_LSQ
                 }
                 cost += robustCostFun.eval_target_cost(1.0, org_errors);
             }
-            // cost += _robustCostFunctions[obj]->eval_target_cost(1.0, cached_errors[obj]);
             return cost;
         }
 
@@ -165,16 +145,11 @@ namespace Robust_LSQ
             {                                
                 NLSQ_CostFunction &costFun = *_costFunctions[obj];    
                 Robust_NLSQ_CostFunction_Base &robustCost = *_robustCostFunctions[obj];
-                // Vector<double> errors(costFun._nMeasurements);
                 f += robustCost.eval_target_cost(1.0, cached_errors[obj]);                
             }            
 
             for (int k = 0; k < _Sigma.size(); ++k)
-                h += 0.5*_Sigma[k][0]*_Sigma[k][0];
-
-            // NLSQ_CostFunction &constraintCost = *_costFunctions[constraintIdx];
-            // Robust_NLSQ_CostFunction_Base &constraintRobustCost = *_robustCostFunctions[constraintIdx];
-            // h += constraintRobustCost.eval_target_cost(1.0, cached_errors[constraintIdx]);
+                h += _Sigma[k][0]*_Sigma[k][0];
         }
 
         //Evaluation of obj gradient only involves hi
@@ -349,7 +324,6 @@ namespace Robust_LSQ
                                     scaleMatrixIP(w, J1tJ2);
                                     addMatricesIP(J1tJ2, Hs[n]);
 
-
                                     if ((t1 == 2) && (t2==2))
                                     {
                                         Hs[n][0][0] += _mu1 + _hLambda;
@@ -368,8 +342,6 @@ namespace Robust_LSQ
                                 {
                                     assert(false);
                                 }
-                                
-
                             } // end for (k)
                         } // end for (i2)
                     } // end for (i1)
@@ -387,7 +359,6 @@ namespace Robust_LSQ
 
             Vector<double> Jt_e(totalParamDimension);
             Vector<double> gF(totalParamDimension), gH(totalParamDimension);
-            Vector<double> gFH(totalParamDimension);
             Vector<double> delta(totalParamDimension);
             Vector<double> deltaPerm(totalParamDimension);
             double bestCost = 1e20;
@@ -432,7 +403,12 @@ namespace Robust_LSQ
             
                 //Eval cost and inliers, then save the best results
                 double initial_cost = eval_current_cost();  
-                best_cost = min(best_cost, initial_cost);
+                if (initial_cost < best_cost)
+                {
+                    best_cost = initial_cost;
+                    copyToAllParameters(&best_x[0]);
+                }
+
                 //Evaluate objective and constraint violations
                 this->evalFH(cached_errors, f, h);
 
@@ -440,9 +416,7 @@ namespace Robust_LSQ
                     _filter->addElement(f, h);
 
                 t.stop(); 
-                cout << " Time = " << t.getTime() << "  iter = " << iter << " lambda  = "  << _penaltyLambda 
-                     << " cost = " << initial_cost<< " f = " << f << " h = " << h 
-                     << " hLambda = " << _hLambda << endl;
+                cout << " Time = " << t.getTime() << "  iter = " << iter << " cost = " << initial_cost<< endl;
 
                 if (stepType == PENALTY)    
                     _log_file << t.getTime() << "\t" << iter << "\t" << best_cost << "\t" << f <<"\t" << h << "\t" << endl;
@@ -539,8 +513,10 @@ namespace Robust_LSQ
                         {
                             if (f1 < f)
                                 _filter->removeLastElement();   
-                            f = f1;
-                            h = h1;
+                            f = f1; h = h1;
+
+                            if (h < h_epsilon)  break;
+
                             _penaltyLambda = max(1e-5, _penaltyLambda*0.1);
                             _hLambda *= 0.9;
                         }
@@ -548,15 +524,15 @@ namespace Robust_LSQ
                         {                        
                             cout << "==============ENTER RESTORATION STEP========================\n";
                             this->copyFromAllParameters(&x_saved[0]);                           
-                            acceptCount = 0;
                             stepType = EXPLORATION;
                             iter--;
-                            _hLambda = 1.0;
+                            //Reset damping parameters
+                            _hLambda = h_damping;
                             _penaltyLambda = penalty_damping;
                         }
                         
                     }
-                    else //Exploration
+                    else //Restoration --> Line Search
                     {
                         double alpha = _hMinStepSize;                    
                         bool dominated = true;
@@ -603,13 +579,12 @@ namespace Robust_LSQ
                             evalF_Jt_e(cached_weights, gF);
                             double angle = innerProduct(gH, gF);
                             angle /= (norm_L2(gH) + norm_L2(gF));
-                            cout << alpha  << "   " << angle << " " << f1 << " " << h1 << endl;
+                            // cout << alpha  << "   " << angle << " " << f1 << " " << h1 << endl;
                                                          
                             if (!dominated && angle > maxAngle)
                             {
                                 maxAngle = angle;
                                 this->copyToAllParameters(&best_x[0]);
-                                cout << maxAngle << " ---- " <<endl;                                          
                             }
                             alpha += _hStepSizeScale;                        
                             this->copyFromAllParameters(&x_saved[0]);                            
@@ -624,9 +599,6 @@ namespace Robust_LSQ
                     cout << " LDL Failed , lambda = " << _penaltyLambda << endl;
                 }
                 iter++;
-
-                
-
             } //while iter
 
    

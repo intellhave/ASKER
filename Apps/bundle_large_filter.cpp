@@ -1,27 +1,26 @@
 #include "bundle_large_common.h"
-#include "robust/bundle_filter_scale.h"
+#include "robust/bundle_filter.h"
 #include "Base/v3d_timer.h"
 #include <fstream>
 
 using namespace std;
 using namespace V3D;
+
 namespace
 {   
     using namespace Robust_LSQ;
     typedef Psi_SmoothTrunc Psi_Robust;
     typedef Psi_Quadratic Psi_Constraints;
     typedef Robust_Filter_MOO_Optimizer Optimizer_Base; 
-    
     //**********************************************************************
     #define CAMERA_PARAM_TYPE 0
     #define POINT_PARAM_TYPE 1
     #define SCALE_PARAM_TYPE 2
-
     struct SparseMetricBundleOptimizer;
     int current_iteration = 0;
     int sigma_init = 5.0;
 
-//**********************************************************************
+    //**********************************************************************
     struct BundleCostFunction : public NLSQ_CostFunction, public BundleCost_Base
     {
         BundleCostFunction(int const mode, std::vector<int> const &usedParamTypes,
@@ -56,7 +55,7 @@ namespace
             ++current_iteration;
         }
 
-        virtual void initializeResiduals() { } //this->precompute_residuals(); }
+        virtual void initializeResiduals() { } 
 
         virtual void evalOrgResidual(int const k, Vector<double> &e) const
         {
@@ -67,6 +66,7 @@ namespace
         virtual void evalResidual(int const k, Vector<double> &e) const
         {            
             Vector2d const r = _residuals[k];  e[0] = r[0];  e[1] = r[1];            
+
             //Scale the residual by Sigma
             double s = _Sigma[k][0];  
             V3D::scaleVectorIP(scale(s), e);
@@ -131,38 +131,15 @@ namespace
             _cams(cams), _distortions(distortions), _Xs(Xs),
             _savedTranslations(cams.size()), _savedRotations(cams.size()), _savedFocalLengths(cams.size()), _savedDistortions(cams.size()),
             _savedXs(Xs.size()), _cachedParamLength(0.0)
-            // _Sigma(Sigma)
         {
             //Initialize Sigma
             for (int i = 0; i < _Sigma.size(); ++i)
                 _Sigma[i][0] = sigma_init;
-
-
-            // Since we assume that BA does not alter the inputs too much,
-            // we compute the overall length of the parameter vector in advance
-            // and return that value as the result of getParameterLength().
-            for (int i = 0; i < _cams.size(); ++i)
-            {
-                _cachedParamLength += sqrNorm_L2(_cams[i].getTranslation());
-                _cachedParamLength += 3.0; // Assume eye(3) for R.
-            }
-
-            if (mode >= FULL_BUNDLE_FOCAL_LENGTH)
-                for (int i = 0; i < _cams.size(); ++i)
-                {
-                    double const f = _cams[i].getFocalLength();
-                    _cachedParamLength += f * f;
-                } // end for (i)
-
-            for (int j = 0; j < _Xs.size(); ++j)
-                _cachedParamLength += sqrNorm_L2(_Xs[j]);
-
-            _cachedParamLength = sqrt(_cachedParamLength);
         }
 
         virtual double getParameterLength() const
         {
-            return _cachedParamLength;
+            return 0;
         }
 
         virtual void updateParameters(int const paramType, VectorArrayAdapter<double> const &delta)
@@ -238,8 +215,7 @@ namespace
         virtual void saveAllParameters() { throw("saveAllParameters()"); }
         virtual void restoreAllParameters() { throw("restoreAllParameters()"); }
 
-        // We assume metric/no rotations BA and no update of the rotation matrices (linearized BA)
-        // FIXED: we can handle metric BA now
+        //Store all parameters to dst
         virtual void copyToAllParameters(double *dst)
         {
             int pos = 0;
@@ -273,6 +249,7 @@ namespace
             }
         }
 
+        //Restore parameters from src
         virtual void copyFromAllParameters(double const *src)
         {
             int pos = 0;
@@ -390,8 +367,7 @@ namespace
         costFunctions.push_back(&constraintCost);
 
         //Prepare the robust kernels
-        double const tau_data = inlierThreshold; // / sqrt(2*Psi_Robust::fun(1000.0));
-        cout << "tau_data = " << tau_data << endl;        
+        double const tau_data = inlierThreshold; 
         Robust_NLSQ_CostFunction<Psi_Robust> robustCostFun(costFun, tau_data, 1.0);
         Robust_NLSQ_CostFunction<Psi_Constraints> robustConstraintCost(constraintCost, 1.0,1.0 );
         robustCostFunctions.push_back(&robustCostFun);
@@ -400,15 +376,8 @@ namespace
         std::ofstream log_file("log_filter.txt");
         SparseMetricBundleOptimizer opt(mode, paramDesc, costFunctions, robustCostFunctions, cams, distortions, Xs, Sigma, log_file);
         opt.updateThreshold = 1e-12;
-        //opt.updateThreshold = 1e-20;
-        opt.maxIterations = 1000;
+        opt.maxIterations = 100;
         opt.tau = 1e-3;
-        //opt.tau = 1e-6;   
-        
-    #if defined(USE_LINEARIZED_BUNDLE)
-        double const avg_focal_length = AVG_FOCAL_LENGTH;
-        E_init_linearized = evalCurrentObjective(avg_focal_length, inlier_threshold, costFun);
-    #endif
 
         Timer t("BA");
         t.start();
@@ -419,13 +388,6 @@ namespace
 
         log_file.close();
 
-
-
-    #if defined(USE_LINEARIZED_BUNDLE)
-        E_final_linearized = evalCurrentObjective(avg_focal_length, inlier_threshold, costFun);
-    #endif
-
-        //params.lambda = opt.lambda;
         return opt.status;
     }
 
@@ -433,7 +395,7 @@ namespace
 
     //**********************************************************************
 
-    int main(int argc, char *argv[]) //369
+    int main(int argc, char *argv[]) 
     {
         if (argc != 2)
         {
@@ -496,7 +458,6 @@ namespace
             distortions[i].k1 = k1 * f2;
             distortions[i].k2 = k2 * f2 * f2;
 
-            //cout << "k1 = " << k1 << " k2 = " << k2 << endl;
         } // end for (i)
         cout << "Done." << endl;
 
@@ -505,8 +466,6 @@ namespace
         for (int j = 0; j < M; ++j)
             is >> Xs[j][0] >> Xs[j][1] >> Xs[j][2];
         cout << "Done." << endl;
-
-        corrupt_input_data(cams, Xs);
 
         double init_ratio = showErrorStatistics(avg_focal_length, inlier_threshold, cams, distortions, Xs, measurements, correspondingView, correspondingPoint);
         double E_init = showObjective(avg_focal_length, inlier_threshold, cams, distortions, Xs, measurements, correspondingView, correspondingPoint);
@@ -518,10 +477,6 @@ namespace
                                  inlier_threshold / avg_focal_length,
                                  Sigma);
 
-    #if defined(USE_LINEARIZED_BUNDLE)
-        E_init = E_init_linearized;
-    #endif
-        
         std::string file_name = "structure_filter.txt";
         ofstream str_file(file_name.c_str());
         for (int i = 0; i < M; ++i)
@@ -532,15 +487,9 @@ namespace
         cout << "inlier_threshold = " << inlier_threshold << endl;
         double final_ratio = showErrorStatistics(avg_focal_length, inlier_threshold, cams, distortions, Xs, measurements, correspondingView, correspondingPoint);
         //showErrorStatistics(KMat, cams, Xs, measurements, correspondingView, correspondingPoint);
-    #if defined(USE_LINEARIZED_BUNDLE)
-        double const E_final = E_final_linearized;
-    #else
         double const E_final = showObjective(avg_focal_length, inlier_threshold, cams, distortions, Xs, measurements, correspondingView, correspondingPoint);
-    #endif
-        //cout << "E_init = " << E_init << " E_final = " << E_final << " initial ratio = " << init_ratio << " final ratio = " << final_ratio << endl;
         char line[1000];
         sprintf(line, "E_init = %12.3f  E_final = %12.3f  initial ratio = %6f  final ratio = %6f", E_init, E_final, init_ratio, final_ratio);
         cout << line << endl;
-
         return 0;
 } //end namespace
