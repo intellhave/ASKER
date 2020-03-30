@@ -44,11 +44,20 @@ set (ALL_SRC
 
 include_directories(${V3D_INCLUDE_DIRS} )
 
-set (MAIN_FILE bundle_large_filter.cpp)
-set (EXE_NAME asker)
+set (ASKER_MAIN_FILE bundle_large_filter.cpp)
+set (ASKER_EXE asker)
 
-set (CMAKE_BUILD_TYPE Release)
-add_executable (${EXE_NAME} Apps/${MAIN_FILE} ${ALL_SRC})
-target_link_libraries(${EXE_NAME} colamd )
-target_compile_options(${EXE_NAME} PRIVATE -O3 -fopenmp)
+set (MOO_MAIN_FILE bundle_large_moo.cpp)
+set (MOO_EXE moo)
+
+set (CMAKE_BUILD_TYPE Debug)
+add_executable (${ASKER_EXE} Apps/${ASKER_MAIN_FILE} ${ALL_SRC})
+target_link_libraries(${ASKER_EXE} colamd )
+target_compile_options(${ASKER_EXE} PRIVATE -O3 )
+
+add_executable (${MOO_EXE} Apps/${MOO_MAIN_FILE} ${ALL_SRC})
+target_link_libraries(${MOO_EXE} colamd )
+target_compile_options(${MOO_EXE} PRIVATE -O3 )
+
+
 
